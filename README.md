@@ -161,8 +161,10 @@ Metadata-Extraction/
 ## Requirements
 
 - Python 3.9, 3.10, or 3.11
-- Windows 10/11 for Windows OCR, or Linux/macOS with Tesseract OCR
+- Windows 10/11 for Windows OCR support
+- Tesseract OCR for Linux/macOS or as an alternative OCR engine
 
+The required Python packages are listed in `requirements.txt`.
 The required Python packages are listed in `requirements.txt`.
 
 Some of the main dependencies are:
@@ -350,9 +352,9 @@ Contains the recall results for each field and the overall recall.
 
 ---
 
-## Assignment Requirements Covered
+## Assignment Requirements
 
-The project covers the main requirements of the metadata extraction task:
+The implementation covers the main requirements of the metadata extraction task:
 
 - DOCX document processing
 - Scanned PNG/JPG document processing
