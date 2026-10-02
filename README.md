@@ -165,7 +165,6 @@ Metadata-Extraction/
 - Tesseract OCR for Linux/macOS or as an alternative OCR engine
 
 The required Python packages are listed in `requirements.txt`.
-The required Python packages are listed in `requirements.txt`.
 
 Some of the main dependencies are:
 
