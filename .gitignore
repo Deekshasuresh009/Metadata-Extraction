@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE / Editor configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.*
+
+# Logs & temporary files
+*.log
+scratch/
+temp/
+tmp/
+.DS_Store
+Thumbs.db
+
+# Model weights cache (downloaded on demand via Hugging Face Hub)
+models/

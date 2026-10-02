@@ -1,0 +1,46 @@
+{
+  "evaluation_name": "Official Final Test-Set Evaluation",
+  "total_test_documents": 4,
+  "total_fields_evaluated": 24,
+  "total_true_exact_matches": 10,
+  "total_false_mismatches": 14,
+  "overall_test_recall": 0.4167,
+  "per_field_results": {
+    "Aggrement Value": {
+      "true_matches": 4,
+      "false_matches": 0,
+      "total": 4,
+      "recall": 1.0
+    },
+    "Aggrement Start Date": {
+      "true_matches": 3,
+      "false_matches": 1,
+      "total": 4,
+      "recall": 0.75
+    },
+    "Aggrement End Date": {
+      "true_matches": 1,
+      "false_matches": 3,
+      "total": 4,
+      "recall": 0.25
+    },
+    "Renewal Notice (Days)": {
+      "true_matches": 1,
+      "false_matches": 3,
+      "total": 4,
+      "recall": 0.25
+    },
+    "Party One": {
+      "true_matches": 1,
+      "false_matches": 3,
+      "total": 4,
+      "recall": 0.25
+    },
+    "Party Two": {
+      "true_matches": 0,
+      "false_matches": 4,
+      "total": 4,
+      "recall": 0.0
+    }
+  }
+}
