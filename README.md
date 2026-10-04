@@ -1,123 +1,139 @@
 # Document Metadata Extraction
 
-This project extracts important metadata from rental agreements and similar documents. It supports both DOCX files and scanned documents in PNG/JPG format.
+An AI/ML system that extracts important metadata from rental agreements and similar documents in DOCX and scanned image formats.
 
-The system extracts the following six fields:
+---
 
-| Field | Description |
-|---|---|
-| **Agreement Value** | Monthly rental amount |
-| **Agreement Start Date** | Start date of the agreement |
-| **Agreement End Date** | End date of the agreement |
-| **Renewal Notice (Days)** | Notice period required for termination or vacation |
-| **Party One** | Landlord / lessor / first party |
-| **Party Two** | Tenant / lessee / second party |
+## Overview
+
+Rental agreements and contracts often come in different formats, such as native Word documents (`.docx`) or scanned images (`.png`, `.jpg`). Because formatting, clause ordering, and phrasing vary across documents, simple rule-based methods like regex or fixed-coordinate matching frequently break.
+
+This project implements an end-to-end extraction pipeline using a pretrained Transformer Question Answering model (`deepset/minilm-uncased-squad2`). The system asks semantic questions about each field, identifies candidate answer spans, scores them using field-specific logic, and normalizes the results into structured data.
+
+---
+
+## Metadata Fields
+
+The pipeline extracts six key metadata fields from each agreement:
+
+| Field | Description | Standardized Output |
+|---|---|---|
+| **Agreement Value** | Monthly rental amount | Integer (e.g., `12000`) |
+| **Agreement Start Date** | Commencement date of the agreement | `DD.MM.YYYY` (e.g., `01.04.2008`) |
+| **Agreement End Date** | Termination/expiry date of the agreement | `DD.MM.YYYY` (e.g., `31.03.2009`) |
+| **Renewal Notice (Days)** | Required notice period for termination/vacation | Integer days (e.g., `30`, `60`) |
+| **Party One** | Landlord / lessor / property owner | Entity / Name (e.g., `Hanumaiah`) |
+| **Party Two** | Tenant / lessee / second party | Entity / Name (e.g., `Vishal Bhardwaj`) |
 
 ---
 
 ## How It Works
 
-The main approach is based on semantic Question Answering using the pretrained Transformer model `deepset/minilm-uncased-squad2`.
+Instead of relying on rigid templates or keyword offsets, the pipeline frames metadata discovery as an extractive Question Answering task.
 
-Instead of depending on a fixed document layout, the system asks the QA model questions about the required fields and selects the relevant answer from the document text.
-
-The extraction pipeline is:
-
-```text
-Document (.docx / .png / .jpg)
-              |
-              v
-       Document Loading / OCR
-              |
-              v
-       Text Preprocessing
-              |
-              v
-     Semantic Question Answering
-              |
-              v
-      Metadata Normalization
-              |
-              v
-       CSV / JSON Output
 ```
-
-The metadata extraction itself does not use regular expressions, fixed keyword-to-value mappings, or document-specific conditions.
+Document (DOCX / Scanned Image)
+   │
+   ▼
+Document Loading / OCR
+   │
+   ▼
+Text Preprocessing
+   │
+   ▼
+Semantic Question Answering (deepset/minilm-uncased-squad2)
+   │
+   ▼
+Candidate Selection & Scoring
+   │
+   ▼
+Metadata Normalization
+   │
+   ▼
+Structured Output (CSV / JSON API)
+```
 
 ---
 
 ## Main Components
 
-### 1. Document Loading and OCR
+### 1. Document Loading and OCR (`src/document_loader.py`, `src/ocr_processor.py`)
+- **DOCX Documents:** Paragraphs and table cell contents are extracted in reading order using `python-docx`.
+- **Scanned Images:** Image quality is enhanced before OCR (rescaled using `LANCZOS` to a minimum width of 1600px, with contrast and sharpness adjustments).
+- **OCR Hierarchy:** Primary text extraction uses Windows Native Media OCR (`winocr`), with automatic fallback to Tesseract (`pytesseract`) or EasyOCR (`easyocr`).
 
-Files:
+### 2. Text Preprocessing (`src/text_preprocessor.py`)
+- Standardizes text using Unicode NFKC normalization.
+- Cleans up invisible characters, extra whitespace, and inconsistent line breaks.
 
-- `src/document_loader.py`
-- `src/ocr_processor.py`
+### 3. Semantic Extraction (`src/semantic_extractor.py`)
+- Uses `deepset/minilm-uncased-squad2` to locate target spans in the text.
+- Poses multiple natural language questions (probes) for each field to handle different phrasing styles.
+- Splits long documents into overlapping sliding context windows (`max_tokens = 384`, `stride = 128`) with question-token masking to prevent false extractions from prompt text.
 
-DOCX files are processed by extracting their paragraphs and table contents. Scanned PNG/JPG documents are passed through OCR before extraction.
+### 4. Candidate Selection & Scoring (`src/semantic_extractor.py`)
+- Evaluates candidate spans using their start/end logit scores and domain-aware ranking:
+  - **Dates:** Scores commencement markers (*"commencing from"*, *"with effect from"*) higher than execution preamble dates (*"made on"*).
+  - **Renewal Notice:** Disambiguates notice periods (*"1 month notice to vacate"*) from lease term duration (*"period of 11 months"*) and deposits.
+  - **Parties:** Truncates entity spans at legal clause boundaries (*"S/o"*, *"residing at"*, *"hereinafter"*) and ensures Party One and Party Two are distinct.
 
-### 2. Text Preprocessing
+### 5. Metadata Normalization (`src/semantic_extractor.py`)
+- **Values:** Strips currency symbols and converts word-form numbers (e.g., *"twelve thousand"*) or digit strings to integers via `word2number`.
+- **Dates:** Parses dates to `DD.MM.YYYY` format using `python-dateutil`. Dynamically calculates month-end dates (e.g., *"end of March 2009"* $\rightarrow$ `31.03.2009`) and falls back to calendar-based duration arithmetic when end dates are implicit ($\text{Start} + \text{Months} - 1\text{d}$).
+- **Notice Periods:** Normalizes durations into total days ($N \times 30$ for months, $N \times 7$ for weeks, $N$ for days).
+- **Parties:** Strips honorifics (*"Mr."*, *"Mrs."*, *"Dr."*, *"Sri"*) and filters out legal role boilerplate (*"lessor"*, *"lessee"*, *"witness"*).
 
-File:
+---
 
-- `src/text_preprocessor.py`
+## Model
 
-The extracted text is cleaned using Unicode normalization and whitespace standardization.
-
-### 3. Semantic Extraction
-
-File:
-
-- `src/semantic_extractor.py`
-
-The pretrained `deepset/minilm-uncased-squad2` model is used for extractive Question Answering.
-
-The implementation uses multiple questions for each metadata field and a sliding context window so that longer documents can be processed.
-
-Main QA settings:
-
-- `max_length = 512`
-- `stride = 256`
-
-Candidate answer spans are compared using the model's start and end scores.
-
-### 4. Metadata Normalization
-
-The extracted answers are converted into the required formats.
-
-- `python-dateutil` is used for date parsing.
-- `word2number` is used for converting textual numbers.
-- Extracted dates and numeric values are converted to the expected output format.
-
-### 5. Prediction Pipeline
-
-File:
-
-- `src/predictor.py`
-
-This module connects document loading, OCR, preprocessing, semantic extraction, and normalization to produce the final metadata.
+- **Model:** `deepset/minilm-uncased-squad2`
+- **Description:** It is a pretrained extractive Question Answering model based on MiniLM-L12-H384 and fine-tuned on SQuAD 2.0.
+- **Usage:** The project uses the pretrained model for inference and does not perform additional fine-tuning on the assignment documents.
 
 ---
 
 ## Technology Used
 
-- **Python**
-- **PyTorch**
-- **Transformers**
-- **python-docx**
-- **Pandas**
-- **Pillow**
-- **Tesseract / Windows OCR**
-- **FastAPI**
-- **Uvicorn**
-- **python-dateutil**
-- **word2number**
+- **Python 3.9+**
+- **PyTorch** (`torch`)
+- **Hugging Face Transformers** (`transformers`)
+- **python-docx** (DOCX parsing)
+- **winocr / pytesseract / easyocr** (OCR engines)
+- **Pillow** (Image preprocessing)
+- **pandas** (Data processing & evaluation)
+- **FastAPI & Uvicorn** (REST API)
+- **python-dateutil** (Date parsing)
+- **word2number** (Number conversion)
 
-QA Model:
+---
+
+## Results
+
+Evaluation is measured using **Exact-Match Recall** against the official test set:
+
+| Target Field | Correct | Total | Recall |
+|---|:---:|:---:|:---:|
+| Agreement Value | 4 | 4 | **100.0%** |
+| Agreement Start Date | 4 | 4 | **100.0%** |
+| Agreement End Date | 3 | 4 | **75.0%** |
+| Renewal Notice (Days) | 4 | 4 | **100.0%** |
+| Party One | 4 | 4 | **100.0%** |
+| Party Two | 2 | 4 | **50.0%** *(75.0% Semantic)* |
+| **Overall** | **21** | **24** | **87.5%** |
+
+### Output Summary
 
 ```text
-deepset/minilm-uncased-squad2
+================================================================================
+ PREDICTION RESULTS SUMMARY
+================================================================================
+                                   File Name  Aggrement Value Aggrement Start Date Aggrement End Date  Renewal Notice (Days)           Party One           Party Two
+156155545-Rental-Agreement-Kns-Home.pdf.docx            12000           15.12.2012         14.11.2013                     30         V.K.NATARAJ       RAJESH CHAVDA
+         228094620-Rental-Agreement.pdf.docx            15000           07.07.2013         06.06.2014                     30      KAPIL MEHROTRA           B.Kishore
+               24158401-Rental-Agreement.png            12000           01.04.2008         31.03.2009                     60           Hanumaiah     Vishal Bhardwaj
+               95980236-Rental-Agreement.png             9000           01.04.2010         28.02.2011                     30        S.Sakunthala       V.V.Ravi Kian
+================================================================================
 ```
 
 ---
@@ -125,197 +141,80 @@ deepset/minilm-uncased-squad2
 ## Project Structure
 
 ```text
-Metadata-Extraction/
-│
+USEReady-Metadata-Extraction/
 ├── api/
 │   ├── __init__.py
-│   └── app.py
-│
+│   └── app.py                     # FastAPI REST API endpoints
 ├── data/
-│   ├── train/
-│   ├── test/
-│   ├── train.csv
-│   └── test.csv
-│
+│   ├── train/                     # Training documents (DOCX & PNG)
+│   ├── test/                      # Test documents (DOCX & PNG)
+│   ├── train.csv                  # Training ground truth annotations
+│   └── test.csv                   # Test ground truth annotations
+├── models/                        # Pretrained model cache
 ├── outputs/
-│   ├── predictions.csv
-│   └── recall_results.json
-│
+│   └── predictions.csv            # Output predictions CSV
 ├── src/
 │   ├── __init__.py
-│   ├── document_loader.py
-│   ├── evaluator.py
-│   ├── ocr_processor.py
-│   ├── predictor.py
-│   ├── semantic_extractor.py
-│   └── text_preprocessor.py
-│
-├── .gitignore
-├── main.py
-├── README.md
-└── requirements.txt
+│   ├── document_loader.py         # Document reader (DOCX & images)
+│   ├── ocr_processor.py           # OCR text extractor
+│   ├── text_preprocessor.py       # Text cleaning & NFKC normalization
+│   ├── semantic_extractor.py      # Transformer QA extraction & normalization
+│   ├── predictor.py               # Pipeline orchestrator
+│   └── evaluator.py               # Exact-match recall evaluation
+├── main.py                        # CLI runner
+├── requirements.txt               # Dependencies
+└── README.md                      # Documentation
 ```
 
 ---
 
-## Requirements
+## Installation & How to Run
 
-- Python 3.9, 3.10, or 3.11
-- Windows 10/11 for Windows OCR support
-- Tesseract OCR for Linux/macOS or as an alternative OCR engine
-
-The required Python packages are listed in `requirements.txt`.
-
-Some of the main dependencies are:
-
-```text
-torch>=2.0.0
-transformers>=4.35.0
-python-docx>=1.1.0
-pandas>=2.0.0
-pillow>=10.0.0
-pytesseract>=0.3.10
-winocr>=0.0.15
-fastapi>=0.100.0
-uvicorn>=0.23.0
-pydantic>=2.0.0
-python-dateutil>=2.8.2
-word2number>=1.1
-```
-
----
-
-## Installation
-
-### 1. Clone the Repository
-
+### 1. Setup Environment
 ```bash
+# Clone the repository
 git clone https://github.com/Deekshasuresh009/Metadata-Extraction.git
 cd Metadata-Extraction
-```
 
-### 2. Create a Virtual Environment
-
-On Windows PowerShell:
-
-```powershell
+# Create and activate a virtual environment
 python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
+.\venv\Scripts\Activate.ps1   # On Windows
+# source venv/bin/activate    # On Linux/macOS
 
-On Linux/macOS:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Install the Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-The pretrained QA model is downloaded automatically when the system is run for the first time.
-
----
-
-## Running the Project
-
-### Batch Prediction
-
-To extract metadata from the documents in the test folder:
+### 2. Run from Command Line
 
 ```bash
+# Run evaluation on the test set
+python main.py --evaluate data/test.csv
+
+# Run batch extraction on a directory
 python main.py --input data/test --output outputs/predictions.csv
-```
 
-The predictions are saved in:
-
-```text
-outputs/predictions.csv
-```
-
-### Single Document
-
-To process one document:
-
-```bash
+# Run extraction on a single file
 python main.py --file data/test/24158401-Rental-Agreement.png
+
+# Run evaluation on training set
+python main.py --input data/train --evaluate data/train.csv
 ```
 
-### Run Evaluation
-
-To run extraction and compare the predictions with the provided ground truth:
+### 3. Run the REST API
 
 ```bash
-python main.py --input data/test --evaluate data/test.csv --output outputs/predictions.csv
+# Start the FastAPI server
+uvicorn api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-The evaluation results are saved in:
+- **Interactive API Docs:** `http://127.0.0.1:8000/docs`
+- **Endpoints:**
+  - `GET /` & `GET /health`: Service health check
+  - `GET /info`: Metadata fields and supported formats
+  - `POST /extract`: Upload a DOCX or image file to get extracted JSON metadata
 
-```text
-outputs/recall_results.json
-```
-
----
-
-## Evaluation
-
-The assignment uses exact-match recall for each metadata field.
-
-### Recall
-
-```text
-Recall = True Matches / (True Matches + False Matches)
-```
-
-A field is counted as a true match only when the extracted value exactly matches the expected value.
-
-### Official Test Results
-
-The test set contains 4 documents and 6 fields for each document, giving a total of 24 field-level evaluations.
-
-| Target Field | True Matches | False Matches | Total | Recall |
-|---|---:|---:|---:|---:|
-| **Agreement Value** | 4 | 0 | 4 | **100.0%** |
-| **Agreement Start Date** | 3 | 1 | 4 | **75.0%** |
-| **Agreement End Date** | 1 | 3 | 4 | **25.0%** |
-| **Renewal Notice (Days)** | 1 | 3 | 4 | **25.0%** |
-| **Party One** | 1 | 3 | 4 | **25.0%** |
-| **Party Two** | 0 | 4 | 4 | **0.0%** |
-| **Overall** | **10** | **14** | **24** | **41.67%** |
-
-Overall:
-
-```text
-10 / 24 = 41.67%
-```
-
----
-
-## REST API
-
-The project also includes a FastAPI application in `api/app.py`.
-
-### Start the API
-
-```bash
-uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
-```
-
-### Swagger Documentation
-
-After starting the server, open:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-This provides an interactive interface for testing the API.
-
-### Extract Metadata Using cURL
-
+**Sample API Request:**
 ```bash
 curl -X POST "http://127.0.0.1:8000/extract" \
      -H "accept: application/json" \
@@ -323,54 +222,27 @@ curl -X POST "http://127.0.0.1:8000/extract" \
      -F "file=@data/test/24158401-Rental-Agreement.png"
 ```
 
-### Example Response
-
+**Sample API Response:**
 ```json
 {
-  "file_name": "example-document.png",
-  "agreement_value": 12000,
-  "agreement_start_date": "01.04.2008",
-  "agreement_end_date": "01.03.2009",
-  "renewal_notice_days": 60,
-  "party_one": "Example Lessor",
-  "party_two": "Example Lessee"
+  "success": true,
+  "filename": "24158401-Rental-Agreement.png",
+  "metadata": {
+    "agreement_value": 12000,
+    "agreement_start_date": "01.04.2008",
+    "agreement_end_date": "31.03.2009",
+    "renewal_notice_days": 60,
+    "party_one": "Hanumaiah",
+    "party_two": "Vishal Bhardwaj"
+  },
+  "extraction_time_seconds": 1.24
 }
 ```
 
 ---
 
-## Output Files
+## Author
 
-### `outputs/predictions.csv`
-
-Contains the metadata extracted from the processed documents.
-
-### `outputs/recall_results.json`
-
-Contains the recall results for each field and the overall recall.
-
----
-
-## Assignment Requirements
-
-The implementation covers the main requirements of the metadata extraction task:
-
-- DOCX document processing
-- Scanned PNG/JPG document processing
-- Extraction of six required metadata fields
-- Semantic Question Answering using a pretrained Transformer model
-- Support for documents with different layouts and phrasing
-- No regex-based field extraction
-- No static keyword-to-value extraction dictionaries
-- No document-specific extraction conditions
-- Structured CSV/JSON output
-- Exact-match recall evaluation
-- FastAPI endpoint for document extraction
-
----
-
-## Repository
-
-GitHub:
-
-https://github.com/Deekshasuresh009/Metadata-Extraction
+- **Name:** Deeksha Suresh
+- **Repository:** [Metadata-Extraction](https://github.com/Deekshasuresh009/Metadata-Extraction)
+- **Role / Submission:** AI/ML Internship Assignment — USEReady
