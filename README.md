@@ -239,10 +239,4 @@ curl -X POST "http://127.0.0.1:8000/extract" \
 }
 ```
 
----
 
-## Author
-
-- **Name:** Deeksha Suresh
-- **Repository:** [Metadata-Extraction](https://github.com/Deekshasuresh009/Metadata-Extraction)
-- **Role / Submission:** AI/ML Internship Assignment — USEReady
